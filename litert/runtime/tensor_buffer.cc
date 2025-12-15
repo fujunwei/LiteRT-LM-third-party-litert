@@ -48,7 +48,14 @@
 #include "litert/runtime/open_cl_memory.h"
 #include <CL/cl.h>
 #endif  // LITERT_HAS_OPENCL_SUPPORT
-#include "litert/runtime/d3d12_memory.h"
+
+#include "litert/vendors/intel_openvino/openvino_shared_core.h"
+#include "litert/vendors/intel_openvino/utils.h"
+#include <openvino/runtime/intel_npu/level_zero/level_zero.hpp>
+#include <openvino/runtime/remote_context.hpp>
+#include "litert/core/environment.h"
+#include "litert/c/internal/litert_tensor_buffer_registry.h"
+#include "litert/runtime/tensor_buffer_registry.h"
 
 // TODO(b/449784615): Include xnnpack.h instead of duplicating the macros.
 #ifndef XNN_EXTRA_BYTES
@@ -204,7 +211,7 @@ LiteRtTensorBufferT::~LiteRtTensorBufferT() {
       break;
     case kLiteRtTensorBufferTypeD3D12Buffer:
       // internal d3d12 buffer is auto-disposed by the
-      // litert::internal::D3D12Memory destructor.
+      // litert::internal::D3D12Buffer destructor.
       break;
   }
 }
@@ -449,19 +456,47 @@ LiteRtTensorBufferT::CreateManagedOpenClMemory(
 #endif  // LITERT_HAS_OPENCL_SUPPORT
 
 Expected<LiteRtTensorBufferT::Ptr>
-LiteRtTensorBufferT::CreateManagedD3D12Memory(
+LiteRtTensorBufferT::CreateManagedLevelZeroBuffer(
     LiteRtEnvironment env, const LiteRtRankedTensorType& tensor_type,
     LiteRtTensorBufferType buffer_type, size_t buffer_size) {
   // LITERT_ASSIGN_OR_RETURN(auto gpu_env, GetGpuEnvironment(env));
-  auto gpu_env = nullptr;
-  LITERT_ASSIGN_OR_RETURN(auto buffer,
-                          litert::internal::D3D12Memory::Alloc(
-                              gpu_env, tensor_type, buffer_type, buffer_size));
+  std::optional<LiteRtAny> option_custom_buffer_handlers = env->GetOption(kLiteRtEnvOptionTagCustomTensorBufferHandlers);
+  if (!option_custom_buffer_handlers) {
+    return Unexpected(kLiteRtStatusErrorInvalidArgument, "No custom tensor buffer handlers found.");
+  }
+  const auto* custom_buffer_handlers =
+      reinterpret_cast<const LiteRtCustomTensorBufferHandlers*>(
+          option_custom_buffer_handlers->ptr_value);
+  litert::internal::TensorBufferRegistry* registry = nullptr;
+  LiteRtGetTensorBufferRegistry(
+      env, reinterpret_cast<void**>(&registry));
+  if (!registry) {
+    return Unexpected(kLiteRtStatusErrorInvalidArgument, "Failed to get tensor buffer registry.");
+  }
+  litert::Expected<litert::internal::CustomTensorBufferHandlers> registered_handlers =
+      registry->GetCustomHandlers(kLiteRtTensorBufferTypeD3D12Buffer);
+  if (!registered_handlers.HasValue()) {
+    litert::internal::CustomTensorBufferHandlers handlers = {
+        .create_func = custom_buffer_handlers->create_func,
+        .destroy_func = custom_buffer_handlers->destroy_func,
+        .lock_func = custom_buffer_handlers->lock_func,
+        .unlock_func = custom_buffer_handlers->unlock_func,
+    };
+    registry->RegisterHandlers(kLiteRtTensorBufferTypeD3D12Buffer, handlers);
+  }
+      
+  LITERT_ASSIGN_OR_RETURN(size_t packed_size,
+                          litert::internal::GetNumPackedBytes(tensor_type));
+  auto buffer = litert::internal::CustomBuffer::Alloc(
+      env, tensor_type, buffer_type, buffer_size, packed_size);
+  if (!buffer) {
+    return Unexpected(buffer.Error());
+  }
+
   Ptr tensor_buffer(
       new LiteRtTensorBufferT(env, tensor_type, buffer_type, buffer_size));
-  LITERT_LOG(LITERT_ERROR, "======LiteRT-LM CreateManagedD3D12Memory %p, ", tensor_buffer.get());
-  tensor_buffer->buffer_.emplace<litert::internal::D3D12Memory>(
-      std::move(buffer));
+  tensor_buffer->buffer_.emplace<litert::internal::CustomBuffer>(
+      std::move(*buffer));
   return tensor_buffer;
 }
 
@@ -691,7 +726,7 @@ LiteRtTensorBufferT::CreateManagedWithAlignment(
     }
     case kLiteRtTensorBufferTypeD3D12Buffer: {
 // #if LITERT_HAS_OPENCL_SUPPORT
-      return CreateManagedD3D12Memory(env, tensor_type, buffer_type,
+      return CreateManagedLevelZeroBuffer(env, tensor_type, buffer_type,
                                        buffer_size);
 // #else
 //       return Unexpected(kLiteRtStatusErrorInvalidArgument,
@@ -872,10 +907,12 @@ LiteRtTensorBufferT::GetOpenClMemory() {
 }
 #endif  // LITERT_HAS_OPENCL_SUPPORT
 
-Expected<litert::internal::D3D12Memory*>
-LiteRtTensorBufferT::GetD3D12Memory() {
-  if (IsD3D12Memory(buffer_type_)) {
-    return &std::get<litert::internal::D3D12Memory>(buffer_);
+
+Expected<HANDLE>
+LiteRtTensorBufferT::GetLevelZeroBuffer() {
+  if (IsD3D12Buffer(buffer_type_)) {
+    auto buffer = std::get<litert::internal::LevelZeroBuffer>(buffer_);
+    return buffer.level_zero_ptr;
   }
   return Unexpected(
       kLiteRtStatusErrorRuntimeFailure,
@@ -934,7 +971,7 @@ Expected<litert::internal::GlBuffer*> LiteRtTensorBufferT::GetGlBuffer() {
 Expected<litert::internal::CustomBuffer*>
 LiteRtTensorBufferT::GetCustomBuffer() {
   if (IsWebGpuMemory(buffer_type_) || IsVulkanMemory(buffer_type_) ||
-      IsMetalMemory(buffer_type_)) {
+      IsMetalMemory(buffer_type_) || IsD3D12Buffer(buffer_type_)) {
     return &std::get<litert::internal::CustomBuffer>(buffer_);
   }
   return Unexpected(kLiteRtStatusErrorRuntimeFailure,
@@ -1009,6 +1046,7 @@ Expected<void*> LiteRtTensorBufferT::Lock(LiteRtTensorBufferLockMode mode) {
                         "OpenGL buffers are not supported");
 #endif  // LITERT_HAS_OPENGL_SUPPORT
     }
+    case kLiteRtTensorBufferTypeD3D12Buffer:
     case kLiteRtTensorBufferTypeWebGpuBuffer:
     case kLiteRtTensorBufferTypeWebGpuBufferFp16:
     case kLiteRtTensorBufferTypeWebGpuTexture:
@@ -1034,17 +1072,6 @@ Expected<void*> LiteRtTensorBufferT::Lock(LiteRtTensorBufferLockMode mode) {
       return host_memory_ptr;
     }
     case kLiteRtTensorBufferTypeGlTexture:
-    case kLiteRtTensorBufferTypeD3D12Buffer: {
-// #if LITERT_HAS_OPENCL_SUPPORT
-      LITERT_ASSIGN_OR_ABORT(auto d3d12_memory, GetD3D12Memory());
-      LITERT_ASSIGN_OR_RETURN(float* const host_memory_ptr,
-                              d3d12_memory->Lock<float>(mode));
-      return host_memory_ptr;
-// #else
-//       return Unexpected(kLiteRtStatusErrorRuntimeFailure,
-//                         "OpenCL buffers are not supported");
-// #endif  // LITERT_HAS_OPENCL_SUPPORT
-    }
     case kLiteRtTensorBufferTypeUnknown: {
       return Unexpected(kLiteRtStatusErrorRuntimeFailure,
                         "Unexpected tensor buffer type");
@@ -1081,15 +1108,6 @@ Expected<void> LiteRtTensorBufferT::Unlock() {
                         "OpenCL buffers are not supported");
 #endif  // LITERT_HAS_OPENCL_SUPPORT
     }
-    case kLiteRtTensorBufferTypeD3D12Buffer: {
-// #if LITERT_HAS_OPENCL_SUPPORT
-      LITERT_ASSIGN_OR_RETURN(auto d3d12_buffer, GetD3D12Memory());
-      return d3d12_buffer->Unlock<float>();
-// #else
-//       return Unexpected(kLiteRtStatusErrorRuntimeFailure,
-//                         "OpenCL buffers are not supported");
-// #endif  // LITERT_HAS_OPENCL_SUPPORT
-    }
     case kLiteRtTensorBufferTypeGlBuffer: {
 #if LITERT_HAS_OPENGL_SUPPORT
       LITERT_ASSIGN_OR_RETURN(auto gl_buffer, GetGlBuffer());
@@ -1099,6 +1117,7 @@ Expected<void> LiteRtTensorBufferT::Unlock() {
                         "OpenGL buffers are not supported");
 #endif  // LITERT_HAS_OPENGL_SUPPORT
     }
+    case kLiteRtTensorBufferTypeD3D12Buffer:
     case kLiteRtTensorBufferTypeWebGpuBuffer:
     case kLiteRtTensorBufferTypeWebGpuBufferFp16:
     case kLiteRtTensorBufferTypeWebGpuTexture:

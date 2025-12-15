@@ -21,7 +21,14 @@ package(
 
 cc_library(
     name = "ov_utils",
-    hdrs = ["utils.h"],
+    srcs = [
+        "openvino_shared_core.cc",
+    ],
+    hdrs = [
+        "utils.h",
+        "openvino_shared_core.h",
+        "level_zero_buffer_manager.h"
+    ],
     deps = [
         "//litert/c:litert_runtime_c_api_shared_lib",
         "//litert/cc/dynamic_runtime:litert_model",

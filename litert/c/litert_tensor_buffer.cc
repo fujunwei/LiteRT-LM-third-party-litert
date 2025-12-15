@@ -177,19 +177,16 @@ LiteRtStatus LiteRtGetTensorBufferOpenClMemory(LiteRtTensorBuffer tensor_buffer,
 }
 #endif  // LITERT_HAS_OPENCL_SUPPORT
 
-LiteRtStatus LiteRtGetTensorBufferD3D12Memory(LiteRtTensorBuffer tensor_buffer,
-                                               HANDLE* d3d12_mem_addr) {
-  if (!tensor_buffer || !d3d12_mem_addr) {
+LiteRtStatus LiteRtGetTensorBufferLevelZeroBuffer(LiteRtTensorBuffer tensor_buffer,
+                                               HwMemoryHandle* hw_memory_handle) {
+  if (!tensor_buffer || !hw_memory_handle) {
     return kLiteRtStatusErrorInvalidArgument;
   }
-  LITERT_LOG(LITERT_ERROR, "======LiteRtGetTensorBufferD3D12Memory 1");
 
-  LITERT_ASSIGN_OR_RETURN(auto d3d12_memory, tensor_buffer->GetD3D12Memory());
-  LITERT_LOG(LITERT_ERROR, "======LiteRtGetTensorBufferD3D12Memory 2 %p",d3d12_memory );
+  LITERT_ASSIGN_OR_RETURN(auto level_zero_buffer, tensor_buffer->GetCustomBuffer());
+  LITERT_LOG(LITERT_ERROR, "======LiteRtGetTensorBufferLevelZeroBuffer 2 %p",level_zero_buffer);
 
-  *d3d12_mem_addr = d3d12_memory->GetMemoryPtr();
-  
-  LITERT_LOG(LITERT_ERROR, "======LiteRtGetTensorBufferD3D12Memory 3 " );
+  *hw_memory_handle = level_zero_buffer->hw_buffer_handle();
   return kLiteRtStatusOk;
 }
 

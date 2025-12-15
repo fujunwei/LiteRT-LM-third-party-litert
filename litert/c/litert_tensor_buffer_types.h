@@ -77,7 +77,7 @@ inline bool IsOpenClMemory(LiteRtTensorBufferType buffer_type) {
          buffer_type == kLiteRtTensorBufferTypeOpenClImageBufferFp16;
 }
 
-inline bool IsD3D12Memory(LiteRtTensorBufferType buffer_type) {
+inline bool IsD3D12Buffer(LiteRtTensorBufferType buffer_type) {
   return buffer_type == kLiteRtTensorBufferTypeD3D12Buffer;
 }
 

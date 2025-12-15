@@ -193,8 +193,7 @@ LiteRtStatus LiteRtGetTensorBufferOpenClMemory(LiteRtTensorBuffer tensor_buffer,
                                                cl_mem* cl_mem_addr);
 #endif  // LITERT_HAS_OPENCL_SUPPORT
 
-// Return an error if the backing buffer is not a OpenCL memory.
-LiteRtStatus LiteRtGetTensorBufferD3D12Memory(LiteRtTensorBuffer tensor_buffer,
+LiteRtStatus LiteRtGetTensorBufferLevelZeroBuffer(LiteRtTensorBuffer tensor_buffer,
                                                HANDLE* d3d12_mem_addr);
 
 // Create a tensor buffer from an existing OpenGL Buffer.

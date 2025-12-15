@@ -62,11 +62,11 @@ cc_library(
 cc_library(
     name = "d3d12_memory",
     srcs = [
-        "d3d12_memory.cc",
+        "level_zero_buffer.cc",
         "platform_functions.cc",
     ],
     hdrs = [
-        "d3d12_memory.h",
+        "level_zero_buffer.h",
         "platform_functions.h",
         "DirectML.h",
         "d3d12.h",
@@ -87,6 +87,8 @@ cc_library(
         "@com_google_absl//absl/cleanup",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/container:node_hash_map",
+        "//litert/vendors/intel_openvino:ov_utils",
         # "@opencl_headers",
     ],
 )

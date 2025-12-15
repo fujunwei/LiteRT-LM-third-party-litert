@@ -38,6 +38,7 @@
 #include "litert/c/litert_common.h"
 #include "litert/c/litert_model.h"
 #include "litert/vendors/intel_openvino/utils.h"
+#include "litert/vendors/intel_openvino/level_zero_buffer_manager.h"
 
 litert::Expected<LiteRtDispatchDeviceContextT::Ptr>
 LiteRtDispatchDeviceContextT::Create() {
@@ -125,23 +126,19 @@ LiteRtDispatchDeviceContextT::RegisterTensorBuffer(
       litert::openvino::MapLiteTypeToOV(tensor_type.element_type);
   switch (tensor_buffer_type) {
     case kLiteRtTensorBufferTypeD3D12Buffer: {
-      
-      HANDLE shared_memory;
+      HwMemoryHandle hw_memory_handle;
       LITERT_RETURN_IF_ERROR(
-          LiteRtGetTensorBufferD3D12Memory(tensor_buffer, &shared_memory),
+          LiteRtGetTensorBufferLevelZeroBuffer(tensor_buffer, &hw_memory_handle),
           litert::Unexpected(kLiteRtStatusErrorRuntimeFailure,
                              "Failed to get cl_mem buffer"));
-      LITERT_LOG(LITERT_ERROR, "======111==kLiteRtTensorBufferTypeD3D12Buffer %p", shared_memory);
 
-      auto context = core_->get_default_context("NPU")
-                         .as<ov::intel_npu::level_zero::ZeroContext>();
-      std::vector<int32_t> ov_shape_vec(tensor_type.layout.rank);
-      for (int i = 0; i < ov_shape_vec.size(); i++)
-        ov_shape_vec[i] = tensor_type.layout.dimensions[i];
+      // auto context = core_->get_default_context("NPU")
+      //                    .as<ov::intel_npu::level_zero::ZeroContext>();
+      // std::vector<int32_t> ov_shape_vec(tensor_type.layout.rank);
+      // for (int i = 0; i < ov_shape_vec.size(); i++)
+      //   ov_shape_vec[i] = tensor_type.layout.dimensions[i];
 
-      auto remote_tensor = context.create_tensor(
-          ov_element_type, ov::Shape{ov_shape_vec.begin(), ov_shape_vec.end()}, shared_memory);
-      // memcpy(remote_tensor.get(), buffer_host_addr, tensor_buffer_size);
+      LITERT_ASSIGN_OR_RETURN(auto remote_tensor, litert::openvino::GetZeroBufferTensor(hw_memory_handle));
       tensor_handle_map_.emplace((LiteRtTensorBufferHandle)next_handle_,
                                  remote_tensor);
       return next_handle_++;

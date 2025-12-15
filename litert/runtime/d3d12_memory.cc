@@ -395,7 +395,8 @@ Expected<T*> D3D12Memory::Lock(LiteRtTensorBufferLockMode mode) {
     // }
 
     // TODO::Download buffer with D3D12
-    buffer_.ReadbackResources(cpu_buffer_size_, data_);
+    LITERT_LOG(LITERT_ERROR,    "======Download buffer with D3D12.");
+    // buffer_.ReadbackResources(cpu_buffer_size_, data_);
   }
   lock_success = true;
   return Expected<T*>(static_cast<T*>(data_));
@@ -430,6 +431,7 @@ Expected<void> D3D12Memory::Unlock() {
     // }
     //TODO:: upload buffer with D3D12
     
+    LITERT_LOG(LITERT_ERROR,    "======upload buffer with D3D12.");
     void* mem;
     buffer_.comitted_resource.Get()->Map(0, nullptr, &mem);
     // std::vector<float> hostInputData(bytes_size / sizeof(float), 7.0);  // Dummy input data

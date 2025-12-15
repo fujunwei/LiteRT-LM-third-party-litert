@@ -28,9 +28,48 @@
 #include "litert/vendors/c/litert_dispatch_api.h"
 #include "litert/vendors/intel_openvino/dispatch/device_context.h"
 #include "litert/vendors/intel_openvino/dispatch/invocation_context.h"
+#include "litert/c/litert_custom_tensor_buffer.h"
+#include "litert/vendors/intel_openvino/level_zero_buffer_manager.h"
 
 namespace litert {
 namespace openvino {
+
+  LiteRtStatus CreateMyCustomTensorBuffer(
+    LiteRtEnvironment env, const LiteRtRankedTensorType* tensor_type,
+    LiteRtTensorBufferType buffer_type, size_t bytes, size_t packed_bytes,
+    HwMemoryInfoPtr* hw_memory_info) {
+  litert::Expected<void*> level_zero_buffer_result = litert::openvino::Alloc(*tensor_type, bytes);
+  if (!level_zero_buffer_result) {
+    return kLiteRtStatusErrorRuntimeFailure;
+  }
+  auto memory_info = new HwMemoryInfo();
+  memory_info->memory_handle = level_zero_buffer_result.Value();
+  *hw_memory_info = memory_info;
+  return kLiteRtStatusOk;
+}
+
+LiteRtStatus DestroyMyCustomTensorBuffer(LiteRtEnvironment env,
+                                         HwMemoryInfoPtr hw_memory_info) {
+  // auto hw_info = reinterpret_cast<CustomHwMemoryInfo*>(hw_memory_info);
+  // if (hw_info->mapped_ptr) {
+  //   free(hw_info->mapped_ptr);
+  // }
+  // delete hw_info;
+  return kLiteRtStatusOk;
+}
+
+LiteRtStatus UnlockMyCustomTensorBuffer(LiteRtEnvironment env,
+                                        HwMemoryInfoPtr hw_memory_info) {
+  return kLiteRtStatusOk;
+}
+
+LiteRtStatus LockMyCustomTensorBuffer(LiteRtEnvironment env,
+                                      HwMemoryInfoPtr hw_memory_info,
+                                      LiteRtTensorBufferLockMode mode,
+                                      void** host_memory_ptr) {
+  *host_memory_ptr = hw_memory_info->memory_handle;
+  return kLiteRtStatusOk;
+}
 
 // Initialize the Dispatch API runtime.
 // This function should be called before calling any other Dispatch API
@@ -43,6 +82,23 @@ LiteRtStatus DispatchInitialize(LiteRtEnvironmentOptions environment_options,
     LITERT_LOG(LITERT_INFO, "[Openvino]Found device plugin for: %s",
                device.c_str());
 
+  // constexpr const char* kStrValue = "string_value";
+  // LiteRtEnvOption env_option{/*tag=*/kLiteRtEnvOptionTagCompilerCacheDir,
+  //                            /*value=*/{/*type=*/kLiteRtAnyTypeString}};
+  // env_option.value.str_value = kStrValue;
+  // LiteRtSetEnvironmentOptionsValue(environment_options, env_option);
+  LiteRtEnvOption env_option{/*tag=*/kLiteRtEnvOptionTagCustomTensorBufferHandlers,
+                             /*value=*/{/*type=*/kLiteRtAnyTypeVoidPtr}};
+  // TODO:: How to free custom_tensor_buffer_handlers.
+  LiteRtCustomTensorBufferHandlers* custom_tensor_buffer_handlers = (LiteRtCustomTensorBufferHandlers*)
+      malloc(sizeof(LiteRtCustomTensorBufferHandlers));
+  custom_tensor_buffer_handlers->create_func = CreateMyCustomTensorBuffer;
+  custom_tensor_buffer_handlers->destroy_func = DestroyMyCustomTensorBuffer;
+  custom_tensor_buffer_handlers->lock_func = LockMyCustomTensorBuffer;
+  custom_tensor_buffer_handlers->unlock_func = UnlockMyCustomTensorBuffer;
+  env_option.value.ptr_value = custom_tensor_buffer_handlers;
+  LiteRtSetEnvironmentOptionsValue(environment_options, env_option);
+  
   return kLiteRtStatusOk;
 }
 
